@@ -1,90 +1,87 @@
 <?php
-if(isset($_POST['submit'])){
+if (isset($_POST['submit'])) {
+    date_default_timezone_set('Africa/Nairobi');
 
+    $consumerKey = 'ynlRWTPIgVyUfSs8nRQbo3zhiUzMwM4oRAvkYLGZ54fLTJdC';
+    $consumerSecret = 'GtbZ1Hwimx8NA6aBrBVm09OgZ9en2RVOGixXoDYnyJHX4451ZnXbHyRldcRYd2t9';
+    $BusinessShortCode = '174379';
+    $Passkey = 'bfb279f9aa9bdbcf158e97dd71a467cd2e0c893059b10f78e6b72ada1ed2c919';
+    $PartyA = filter_input(INPUT_POST, 'phone', FILTER_SANITIZE_STRING);
+    $AccountReference = '2255';
+    $TransactionDesc = 'Test Payment';
+    $Amount = filter_input(INPUT_POST, 'amount', FILTER_SANITIZE_NUMBER_INT);
+    $Timestamp = date('YmdHis');
+    $Password = base64_encode($BusinessShortCode . $Passkey . $Timestamp);
+    $headers = ['Content-Type:application/json; charset=utf8'];
 
-  date_default_timezone_set('Africa/Nairobi');
+    $access_token_url = 'https://sandbox.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials';
+    $initiate_url = 'https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/processrequest';
+    $CallBackURL = 'https://your-callback-url.com/callback_url.php';
 
-  # access token
-  $consumerKey = 'ynlRWTPIgVyUfSs8nRQbo3zhiUzMwM4oRAvkYLGZ54fLTJdC'; //Fill with your app Consumer Key
-  $consumerSecret = 'GtbZ1Hwimx8NA6aBrBVm09OgZ9en2RVOGixXoDYnyJHX4451ZnXbHyRldcRYd2t9'; // Fill with your app Secret
+    // Get access token
+    $curl = curl_init($access_token_url);
+    curl_setopt($curl, CURLOPT_HTTPHEADER, $headers);
+    curl_setopt($curl, CURLOPT_RETURNTRANSFER, TRUE);
+    curl_setopt($curl, CURLOPT_HEADER, FALSE);
+    curl_setopt($curl, CURLOPT_USERPWD, $consumerKey . ':' . $consumerSecret);
+    $result = curl_exec($curl);
+    $status = curl_getinfo($curl, CURLINFO_HTTP_CODE);
 
-  # define the variales
-  # provide the following details, this part is found on your test credentials on the developer account
-  $BusinessShortCode = '174379';
-  $Passkey = 'bfb279f9aa9bdbcf158e97dd71a467cd2e0c893059b10f78e6b72ada1ed2c919';  
-  
-  /*
-    This are your info, for
-    $PartyA should be the ACTUAL clients phone number or your phone number, format 2547********
-    $AccountRefference, it maybe invoice number, account number etc on production systems, but for test just put anything
-    TransactionDesc can be anything, probably a better description of or the transaction
-    $Amount this is the total invoiced amount, Any amount here will be 
-    actually deducted from a clients side/your test phone number once the PIN has been entered to authorize the transaction. 
-    for developer/test accounts, this money will be reversed automatically by midnight.
-  */
-  
-   $PartyA = $_POST['phone']; // This is your phone number, 
-  $AccountReference = '2255';
-  $TransactionDesc = 'Test Payment';
-  $Amount = $_POST['amount'];;
- 
-  # Get the timestamp, format YYYYmmddhms -> 20181004151020
-  $Timestamp = date('YmdHis');    
-  
-  # Get the base64 encoded string -> $password. The passkey is the M-PESA Public Key
-  $Password = base64_encode($BusinessShortCode.$Passkey.$Timestamp);
+    if (curl_errno($curl)) {
+        die('Error: ' . curl_error($curl));
+    }
 
-  # header for access token
-  $headers = ['Content-Type:application/json; charset=utf8'];
+    if ($status != 200) {
+        echo 'Failed to get access token. Status: ' . $status . '<br>';
+        echo 'Response: ' . $result; // Print the response for debugging
+        exit();
+    }
 
-    # M-PESA endpoint urls
-  $access_token_url = 'https://sandbox.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials';
-  $initiate_url = 'https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/processrequest';
+    $result = json_decode($result);
+    $access_token = $result->access_token;
+    curl_close($curl);
 
-  # callback url
-  $CallBackURL = 'https://safe-harbor-37183-4485ebf29e0c.herokuapp.com/callback_url.php';  
+    // Initiate STK push
+    $stkheader = ['Content-Type:application/json', 'Authorization:Bearer ' . $access_token];
+    $curl = curl_init();
+    curl_setopt($curl, CURLOPT_URL, $initiate_url);
+    curl_setopt($curl, CURLOPT_HTTPHEADER, $stkheader);
+    curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($curl, CURLOPT_POST, true);
 
-  $curl = curl_init($access_token_url);
-  curl_setopt($curl, CURLOPT_HTTPHEADER, $headers);
-  curl_setopt($curl, CURLOPT_RETURNTRANSFER, TRUE);
-  curl_setopt($curl, CURLOPT_HEADER, FALSE);
-  curl_setopt($curl, CURLOPT_USERPWD, $consumerKey.':'.$consumerSecret);
-  $result = curl_exec($curl);
-  $status = curl_getinfo($curl, CURLINFO_HTTP_CODE);
-  $result = json_decode($result);
-  $access_token = $result->access_token;  
-  curl_close($curl);
+    $curl_post_data = [
+        'BusinessShortCode' => $BusinessShortCode,
+        'Password' => $Password,
+        'Timestamp' => $Timestamp,
+        'TransactionType' => 'CustomerPayBillOnline',
+        'Amount' => $Amount,
+        'PartyA' => $PartyA,
+        'PartyB' => $BusinessShortCode,
+        'PhoneNumber' => $PartyA,
+        'CallBackURL' => $CallBackURL,
+        'AccountReference' => $AccountReference,
+        'TransactionDesc' => $TransactionDesc
+    ];
 
-  # header for stk push
-  $stkheader = ['Content-Type:application/json','Authorization:Bearer '.$access_token];
+    $data_string = json_encode($curl_post_data);
+    curl_setopt($curl, CURLOPT_POSTFIELDS, $data_string);
+    $curl_response = curl_exec($curl);
 
-  # initiating the transaction
-  $curl = curl_init();
-  curl_setopt($curl, CURLOPT_URL, $initiate_url);
-  curl_setopt($curl, CURLOPT_HTTPHEADER, $stkheader); //setting custom header
+    if (curl_errno($curl)) {
+        die('Error: ' . curl_error($curl));
+    }
 
-  $curl_post_data = array(
-    //Fill in the request parameters with valid values
-    'BusinessShortCode' => $BusinessShortCode,
-    'Password' => $Password,
-    'Timestamp' => $Timestamp,
-    'TransactionType' => 'CustomerPayBillOnline',
-    'Amount' => $Amount,
-    'PartyA' => $PartyA,
-    'PartyB' => $BusinessShortCode,
-    'PhoneNumber' => $PartyA,
-    'CallBackURL' => $CallBackURL,
-    'AccountReference' => $AccountReference,
-    'TransactionDesc' => $TransactionDesc
-  );
+    $status = curl_getinfo($curl, CURLINFO_HTTP_CODE);
+    if ($status != 200) {
+        echo 'Failed to initiate STK push. Status: ' . $status . '<br>';
+        echo 'Response: ' . $curl_response; // Print the response for debugging
+        exit();
+    }
 
-  $data_string = json_encode($curl_post_data);
-  curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
-  curl_setopt($curl, CURLOPT_POST, true);
-  curl_setopt($curl, CURLOPT_POSTFIELDS, $data_string);
-  $curl_response = curl_exec($curl);
-  print_r($curl_response);
+    curl_close($curl);
 
-  echo $curl_response;
-};
+    // Redirect to a confirmation page
+    header('Location: LASTPAGE.php');
+    exit();
+}
 ?>
